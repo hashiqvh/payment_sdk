@@ -75,10 +75,10 @@ android {
             }
         }
     }
-
-    // Automatically run useAar before every build
-//    preBuild.dependsOn(useAar)
 }
+
+// Automatically run useAar before every build
+preBuild.dependsOn(useAar)
 
 dependencies {
     implementation 'androidx.constraintlayout:constraintlayout:2.2.1'
@@ -125,7 +125,6 @@ dependencies {
     implementation "com.mosambee:base_sdk:BSV_0.0.1.97_PROD_A_Flutter"
     implementation "com.mosambee:device_attacher:DAV_0.0.1.36_A_Flutter"
     implementation "com.mosambee:kozen_sdk:KSV_0.0.1.22_Flutter"
-    implementation "com.mosambee:printersdkwithoutlib:v_1.0.0_PRINTER_FLUTTER"
 
 
 
