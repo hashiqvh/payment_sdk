@@ -1,0 +1,407 @@
+import java.security.MessageDigest
+import java.security.NoSuchAlgorithmException
+
+group = "com.mosambee.flutter_mospaymentsdk_3_plugin"
+version = "1.0-SNAPSHOT"
+
+buildscript {
+    ext.kotlin_version = "1.8.22"
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        classpath("com.android.tools.build:gradle:8.1.0")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version")
+    }
+}
+
+String localMavenPath = project.mkdir("build").absolutePath
+
+rootProject.allprojects {
+    repositories {
+        google()
+        mavenCentral()
+        maven {
+            // [required] aar plugin
+            url "${project(':flutter_mospaymentsdk_3_plugin').projectDir}/build"
+        }
+    }
+}
+
+apply plugin: "com.android.library"
+apply plugin: "kotlin-android"
+
+android {
+    if (project.android.hasProperty("namespace")) {
+        namespace = "com.mosambee.flutter_mospaymentsdk_3_plugin"
+    }
+
+    compileSdk = 34
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
+    }
+
+    kotlinOptions {
+        jvmTarget = JavaVersion.VERSION_1_8
+    }
+
+    sourceSets {
+        main.java.srcDirs += "src/main/kotlin"
+        test.java.srcDirs += "src/test/kotlin"
+    }
+
+    defaultConfig {
+        minSdk = 24
+        consumerProguardFiles 'proguard-rules.pro'
+    }
+
+    dependencies {
+        testImplementation("org.jetbrains.kotlin:kotlin-test")
+        testImplementation("org.mockito:mockito-core:5.0.0")
+    }
+
+    testOptions {
+        unitTests.all {
+            useJUnitPlatform()
+
+            testLogging {
+                events "passed", "skipped", "failed", "standardOut", "standardError"
+                outputs.upToDateWhen {false}
+                showStandardStreams = true
+            }
+        }
+    }
+
+    // Automatically run useAar before every build
+//    preBuild.dependsOn(useAar)
+}
+
+dependencies {
+    implementation 'androidx.constraintlayout:constraintlayout:2.2.1'
+    implementation 'com.squareup.okhttp3:okhttp:4.11.0'
+    implementation "androidx.appcompat:appcompat:1.7.0"
+    implementation 'com.google.android.material:material:1.12.0'
+    implementation 'androidx.activity:activity:1.10.1'
+    implementation 'androidx.core:core-ktx:1.15.0'
+
+
+    implementation 'com.intuit.sdp:sdp-android:1.1.1'
+    implementation 'com.intuit.ssp:ssp-android:1.1.1'
+
+//    implementation fileTree(dir: "libs", include: ["*.aar"])
+
+    //dependency related to AAR
+    //Room Database
+    implementation 'androidx.room:room-runtime:2.6.1'
+//        kapt 'androidx.room:room-compiler:2.4.2'
+    implementation 'androidx.room:room-ktx:2.6.1'
+    implementation 'net.zetetic:android-database-sqlcipher:4.4.2'
+
+    //Crypto
+    implementation 'androidx.security:security-crypto:1.0.0-alpha02'
+
+    //Startup Initializer
+    implementation 'androidx.startup:startup-runtime:1.1.1'
+
+    implementation 'com.google.android.material:material:1.6.1'
+
+
+    //Network libs
+    implementation 'com.squareup.retrofit2:converter-moshi:2.6.0'
+    implementation 'com.squareup.retrofit2:converter-scalars:2.9.0'
+    implementation 'com.squareup.okhttp3:logging-interceptor:4.11.0'
+    implementation 'com.squareup.retrofit2:retrofit:2.9.0'
+    /* {
+         exclude("okhttp")
+     }*/
+    implementation 'com.squareup.retrofit2:converter-gson:2.9.0'
+    implementation  'com.google.code.gson:gson:2.10.1'
+
+
+    implementation "com.mosambee:base_sdk:BSV_0.0.1.97_PROD_A_Flutter"
+    implementation "com.mosambee:device_attacher:DAV_0.0.1.36_A_Flutter"
+    implementation "com.mosambee:kozen_sdk:KSV_0.0.1.22_Flutter"
+    implementation "com.mosambee:printersdkwithoutlib:v_1.0.0_PRINTER_FLUTTER"
+
+
+
+}
+
+
+// Handling AAR Files
+String aarPath = localMavenPath
+
+task useAar {
+    doLast {
+        File libsDir = project.file("libs")
+        def artifactVersionsMap = [:] // key = groupPath/artifact , value = list of versions
+
+        if (libsDir.exists() && libsDir.isDirectory()) {
+            libsDir.listFiles(new FilenameFilter() {
+                boolean accept(File dir, String name) {
+                    return name.endsWith(".aar")
+                }
+            }).each { aarFile ->
+                String aarName = aarFile.name.substring(0, aarFile.name.length() - 4)
+                String[] aarParts = aarName.split("-")
+
+                if (aarParts.length < 3) {
+                    println("Skipping invalid AAR naming: $aarName")
+                    return
+                }
+
+                String group = aarParts[0]    // com.mosambee
+                String artifact = aarParts[1] // base_sdk
+                String version = aarParts[2]  // v_1.0_Flutter
+
+                String groupPath = group.replace('.', '/')
+                String outputDir = "$aarPath/$groupPath/$artifact/$version"
+
+                project.mkdir(outputDir)
+
+                // Prepare filenames
+                String aarOutputName = "${artifact}-${version}.aar"
+
+                println "Processing AAR: $aarFile.name -> $outputDir/$aarOutputName"
+
+                // Copy AAR file and rename
+                project.copy {
+                    from aarFile
+                    into outputDir
+                    rename { fileName -> aarOutputName }
+                }
+
+                File copiedAar = new File(outputDir, aarOutputName)
+                writeChecksumFiles(copiedAar)
+
+                // Create POM file
+                File pomFile = new File(outputDir, "${artifact}-${version}.pom")
+                pomFile.write(createPomStr(group, artifact, version))
+                writeChecksumFiles(pomFile)
+
+                // Collect versions for metadata
+                String artifactKey = "$groupPath/$artifact"
+                if (!artifactVersionsMap.containsKey(artifactKey)) {
+                    artifactVersionsMap[artifactKey] = []
+                }
+                artifactVersionsMap[artifactKey] << version
+            }
+
+            // After processing all AARs, create maven-metadata.xml
+            artifactVersionsMap.each { artifactKey, versionsList ->
+                def artifactDir = new File("$aarPath/$artifactKey")
+                artifactDir.mkdirs()
+
+                def metadataFile = new File(artifactDir, "maven-metadata.xml")
+                metadataFile.text = createMetadataStrFull(groupIdFromPath(artifactKey), artifactFromPath(artifactKey), versionsList)
+                writeChecksumFiles(metadataFile)
+            }
+        } else {
+            println "No 'libs' directory found with AAR files."
+        }
+    }
+}
+
+void writeChecksumFiles(File file) {
+    project.file("${file.absolutePath}.md5").write(getFileMD5(file))
+    project.file("${file.absolutePath}.sha1").write(getFileSha1(file))
+}
+
+String createMetadataStrFull(String groupId, String artifactId, List<String> versions) {
+    versions = versions.sort()
+    String latestVersion = versions.last()
+
+    return """<?xml version="1.0" encoding="UTF-8"?>
+<metadata>
+  <groupId>${groupId}</groupId>
+  <artifactId>${artifactId}</artifactId>
+  <versioning>
+    <release>${latestVersion}</release>
+    <versions>
+${versions.collect { "    <version>${it}</version>" }.join("\n")}
+    </versions>
+    <lastUpdated>${new Date().format('yyyyMMddHHmmss')}</lastUpdated>
+  </versioning>
+</metadata>
+"""
+}
+
+String createPomStr(String groupId, String artifactId, String version) {
+    return """<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>${groupId}</groupId>
+  <artifactId>${artifactId}</artifactId>
+  <version>${version}</version>
+  <packaging>aar</packaging>
+</project>
+"""
+}
+
+String getFileSha1(File file) {
+    return getFileDigest(file, "SHA-1")
+}
+
+String getFileMD5(File file) {
+    return getFileDigest(file, "MD5")
+}
+
+String getFileDigest(File file, String algorithm) {
+    try {
+        MessageDigest digest = MessageDigest.getInstance(algorithm)
+        file.withInputStream { is ->
+            byte[] buffer = new byte[8192]
+            int bytesRead
+            while ((bytesRead = is.read(buffer)) != -1) {
+                digest.update(buffer, 0, bytesRead)
+            }
+        }
+        return digest.digest().encodeHex().toString()
+    } catch (Exception e) {
+        println "Failed to calculate $algorithm for ${file.name}: $e"
+        return ""
+    }
+}
+
+String groupIdFromPath(String path) {
+    return path.substring(0, path.lastIndexOf('/')).replace('/', '.')
+}
+
+String artifactFromPath(String path) {
+    return path.substring(path.lastIndexOf('/') + 1)
+}
+
+
+
+
+
+//String aarPath = localMavenPath
+//task useAar {
+//    File file = project.file("libs")
+//    if (file.exists() && file.isDirectory()) {
+//        file.listFiles().each { item ->
+//            if (item.name.endsWith(".aar")) {
+//                String aarName = item.name.substring(0, item.name.length() - 4)
+//                String[] aarInfo = aarName.split("-")
+//                String sha1 = getFileSha1(item)
+//                String md5 = getFileMD5(item)
+//                String fromStr = item.path
+//                String intoStr = aarPath + "/" + aarInfo[0].replace(".", "/") + "/" + aarInfo[1] + "/" + aarInfo[2]
+//                String newName = aarInfo[1] + "-" + aarInfo[2] + ".aar"
+//
+//                project.copy {
+//                    from fromStr
+//                    into intoStr
+//                    rename(item.name, newName)
+//                }
+//
+//                // Generate checksums
+//                project.file(intoStr + "/" + newName + ".md5").text = md5
+//                project.file(intoStr + "/" + newName + ".sha1").text = sha1
+//
+//                // Generate POM file
+//                String pomPath = intoStr + "/" + aarInfo[1] + "-" + aarInfo[2] + ".pom"
+//                project.file(pomPath).text = createPomFile(aarInfo[0], aarInfo[1], aarInfo[2])
+//
+//                // Handle Maven metadata
+//                String metadataPath = intoStr + "/maven-metadata.xml"
+//                appendVersionToMetadata(metadataPath, aarInfo[2])
+//
+//
+//                project.file(metadataPath + ".md5").text = getFileMD5(new File(metadataPath))
+//                project.file(metadataPath + ".sha1").text = getFileSha1(new File(metadataPath))
+//            }
+//        }
+//    }
+//}
+//
+//import groovy.xml.XmlParser
+//import groovy.xml.XmlUtil
+//
+//// Function to append version to maven-metadata.xml
+//public static void appendVersionToMetadata(String metadataPath, String version) {
+//    File metadataFile = new File(metadataPath)
+//
+//    if (metadataFile.exists()) {
+//        def xml = new XmlParser().parse(metadataFile)
+//        def versionsNode = xml.versioning.versions[0]
+//        def existingVersions = versionsNode.version*.text()
+//
+//        if (!existingVersions.contains(version)) {
+//            versionsNode.appendNode("version", version)
+//            metadataFile.text = XmlUtil.serialize(xml)
+//        }
+//    } else {
+//        metadataFile.text = createMetadataStr('com.mosambee', 'mosambeelib', version)
+//    }
+//}
+//
+//// Function to create maven-metadata.xml
+//public static String createMetadataStr(String groupId, String artifactId, String version) {
+//    return """<?xml version="1.0" encoding="UTF-8"?>
+//<metadata>
+//  <groupId>$groupId</groupId>
+//  <artifactId>$artifactId</artifactId>
+//  <versioning>
+//    <release>$version</release>
+//    <versions>
+//      <version>$version</version>
+//    </versions>
+//    <lastUpdated>${new Date().format('yyyyMMdd')}000000</lastUpdated>
+//  </versioning>
+//</metadata>
+//"""
+//}
+//
+//// Function to generate POM file
+//public static String createPomFile(String groupId, String artifactId, String version) {
+//    return """<?xml version="1.0" encoding="UTF-8"?>
+//<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+//    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+//    <modelVersion>4.0.0</modelVersion>
+//    <groupId>$groupId</groupId>
+//    <artifactId>$artifactId</artifactId>
+//    <version>$version</version>
+//    <packaging>aar</packaging>
+//</project>
+//"""
+//}
+//
+//// Function to generate SHA1 checksum
+//public static String getFileSha1(File file) {
+//    return getFileChecksum(file, "SHA-1")
+//}
+//
+//// Function to generate MD5 checksum
+//public static String getFileMD5(File file) {
+//    return getFileChecksum(file, "MD5")
+//}
+//
+//// Generic function to generate a file checksum
+//public static String getFileChecksum(File file, String algorithm) {
+//    FileInputStream input = null
+//    try {
+//        input = new FileInputStream(file)
+//        MessageDigest digest = MessageDigest.getInstance(algorithm)
+//        byte[] buffer = new byte[1024 * 1024 * 10]
+//        int len
+//        while ((len = input.read(buffer)) > 0) {
+//            digest.update(buffer, 0, len)
+//        }
+//        return new BigInteger(1, digest.digest()).toString(16).padLeft(algorithm == "MD5" ? 32 : 40, '0')
+//    } catch (Exception e) {
+//        println("Error computing checksum: " + e)
+//        return ""
+//    } finally {
+//        input?.close()
+//    }
+//}
+
+

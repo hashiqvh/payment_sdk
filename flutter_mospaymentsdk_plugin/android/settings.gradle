@@ -1,0 +1,4 @@
+rootProject.name = 'flutter_mospaymentsdk_3_plugin'
+include ':flutter_mospaymentsdk_3_plugin'
+
+
